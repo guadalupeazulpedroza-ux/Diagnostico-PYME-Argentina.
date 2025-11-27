@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnóstico Rápido PYME Argentina</title>
+    <!-- Carga de Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Configuración de la fuente Inter -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Fondo gris claro */
+        }
+        .step-active {
+            background-color: #2563eb; /* Azul de Tailwind 600 */
+            border-color: #2563eb;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Firebase SDK Imports (MANDATORY BOILERPLATE) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Variables globales (Requeridas por el entorno)
+        let app, db, auth;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        window.firebaseAppReady = false;
+
+        const initFirebase = async () => {
+            if (Object.keys(firebaseConfig).length > 0) {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                try {
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    console.log("Firebase Auth successful. User ID:", auth.currentUser?.uid);
+                    window.firebaseAppReady = true;
+                } catch (error) {
+                    console.error("Firebase Auth failed:", error);
+                    // Continúa la ejecución sin almacenamiento persistente
+                }
+            } else {
+                console.warn("Firebase configuration not found. Running without persistent storage.");
+            }
+        };
+
+        initFirebase();
+    </script>
+
+    <!-- Contenedor Principal -->
+    <div id="app" class="min-h-screen flex items-center justify-center p-4">
+        <div class="bg-white shadow-2xl rounded-xl p-6 sm:p-8 w-full max-w-2xl transform transition-all duration-500 ease-in-out">
+            <header class="text-center mb-6">
+                <h1 class="text-3xl font-extrabold text-blue-800 mb-1">
+                    Diagnóstico Estratégico PYME
+                </h1>
+                <p class="text-gray-600 text-lg">
+                    Evalúa la salud de tu empresa en 5 pasos clave.
+                </p>
+            </header>
+
+            <!-- Indicador de Progreso -->
+            <div id="progress-bar" class="flex justify-between items-center mb-6 px-2">
+                <!-- Se llenará dinámicamente con círculos de progreso -->
+            </div>
+
+            <!-- Contenedor del Formulario (Test) -->
+            <div id="test-container" class="space-y-6">
+                <!-- Las preguntas se inyectarán aquí -->
+            </div>
+
+            <!-- Contenedor de Resultados (Oculto Inicialmente) -->
+            <div id="results-container" class="hidden text-center p-6 border border-gray-200 rounded-lg bg-gray-50">
+                <h2 class="text-2xl font-bold text-blue-700 mb-4">
+                    Resultados del Diagnóstico
+                </h2>
+                <div id="loading-indicator" class="hidden">
+                    <div class="flex items-center justify-center space-x-2">
+                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                        <p class="text-lg text-blue-600 font-medium">
+                            Analizando con un Contador Experto...
+                        </p>
+                    </div>
+                </div>
+                
+                <div id="diagnostic-output" class="text-left space-y-4">
+                    <!-- El diagnóstico se inyectará aquí -->
+                </div>
+
+                <button onclick="restartTest()" class="mt-8 bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-6 rounded-lg transition duration-300 shadow-md">
+                    Reiniciar Test
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Configuraciones y Datos de Preguntas ---
+
+        // La clave de API se deja vacía para que el entorno la inyecte
+        const apiKey = "";
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+        
+        // Estado de la aplicación
+        let currentStep = 0;
+        let userAnswers = {}; // Almacena {questionId: answerValue}
+
+        const questions = [
+            {
+                id: 'q1',
+                text: '1. ¿Aplica el Ajuste por Inflación (RECPAM) en sus estados contables para reflejar la realidad económica de su PYME?',
+                area: 'Contabilidad (RECPAM)',
+                options: [
+                    { value: 'si', label: 'Sí, rigurosamente.' },
+                    { value: 'a_veces', label: 'A veces, o solo cuando es obligatorio.' },
+                    { value: 'no', label: 'No, no sé cómo aplicarlo o no lo considero relevante.' }
+                ]
+            },
+            {
+                id: 'q2',
+                text: '2. ¿Monitorea diariamente o semanalmente el Flujo de Caja (Cash Flow) y tiene un control estricto de las cuentas por cobrar y pagar?',
+                area: 'Financiero (Liquidez)',
+                options: [
+                    { value: 'si_riguroso', label: 'Sí, tenemos proyecciones semanales y control diario de cuentas.' },
+                    { value: 'si_a_veces', label: 'Solo revisamos saldos bancarios y no tenemos proyecciones.' },
+                    { value: 'no_manual', label: 'No, la gestión es reactiva y manual, sin control de vencimientos.' }
+                ]
+            },
+            {
+                id: 'q3',
+                text: '3. ¿Realiza una planificación fiscal proactiva para optimizar legalmente la carga impositiva (ej. Ingresos Brutos), o solo liquida los impuestos obligatorios?',
+                area: 'Impositivo (Estrategia)',
+                options: [
+                    { value: 'planificacion', label: 'Tenemos una estrategia fiscal para optimizar costos.' },
+                    { value: 'cumplimiento', label: 'Solo cumplimos con las obligaciones que indica la AFIP y el Contador.' },
+                    { value: 'desconocimiento', label: 'Desconozco si existe una estrategia fiscal.' }
+                ]
+            },
+            {
+                id: 'q4',
+                text: '4. ¿Utiliza un sistema de gestión integrado (ERP o software contable avanzado) que automatiza la facturación, contabilidad e impuestos?',
+                area: 'Tecnología/Gestión',
+                options: [
+                    { value: 'si_completo', label: 'Sí, usamos un sistema integral (ERP/Software de gestión).' },
+                    { value: 'basico_planillas', label: 'Uso un software básico solo para facturar y planillas para el resto.' },
+                    { value: 'no_manual', label: 'No, la mayoría de los procesos son manuales.' }
+                ]
+            },
+            {
+                id: 'q5',
+                text: '5. Si necesitara un préstamo bancario hoy, ¿tiene disponibles y actualizados sus Estados Contables (ajustados por inflación) y los reportes de ingresos de los últimos 12 meses?',
+                area: 'Financiero (Acceso a Capital)',
+                options: [
+                    { value: 'si_listo', label: 'Sí, toda la documentación está lista y al día.' },
+                    { value: 'falta_ajustar', label: 'No, los tenemos, pero faltaría el ajuste por inflación o están incompletos.' },
+                    { value: 'no_disponible', label: 'No, tardaría semanas en juntar y preparar la información.' }
+                ]
+            }
+        ];
+
+        // --- Funciones de Utilidad y API ---
+
+        /**
+         * Espera una cantidad de milisegundos.
+         * @param {number} ms - Tiempo en milisegundos.
+         */
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        /**
+         * Realiza la llamada a la API con reintentos y retroceso exponencial.
+         * @param {object} payload - Cuerpo de la solicitud de la API.
+         * @param {number} maxRetries - Número máximo de reintentos.
+         */
+        const fetchWithRetry = async (payload, maxRetries = 5) => {
+            let lastError = null;
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        const errorBody = await response.json();
+                        throw new Error(`API error: ${response.status} - ${JSON.stringify(errorBody)}`);
+                    }
+
+                    return await response.json();
+                } catch (error) {
+                    lastError = error;
+                    console.error(`Attempt ${i + 1} failed:`, error);
+                    if (i < maxRetries - 1) {
+                        const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                        await sleep(delay);
+                    }
+                }
+            }
+            throw new Error(`Max retries reached. Last error: ${lastError.message}`);
+        };
+
+        // --- Lógica del Test y Renderizado ---
+
+        /**
+         * Renderiza el indicador de progreso (círculos)
+         */
+        function renderProgressBar() {
+            const progressBar = document.getElementById('progress-bar');
+            progressBar.innerHTML = '';
+            questions.forEach((q, index) => {
+                const step = index + 1;
+                const isActive = index === currentStep;
+                const isCompleted = index < currentStep;
+
+                const circle = document.createElement('div');
+                circle.className = `flex-1 flex flex-col items-center relative`;
+                
+                const circleInner = document.createElement('div');
+                circleInner.className = `w-10 h-10 rounded-full border-4 flex items-center justify-center font-bold transition-all duration-300 ease-in-out ${
+                    isActive ? 'step-active scale-110 shadow-lg' : 
+                    isCompleted ? 'bg-green-500 border-green-500 text-white' : 
+                    'bg-white border-gray-300 text-gray-400'
+                }`;
+                circleInner.textContent = step;
+
+                const label = document.createElement('p');
+                label.className = `text-sm mt-1 ${isActive ? 'text-blue-700 font-semibold' : 'text-gray-500'}`;
+                label.textContent = `Paso ${step}`;
+
+                circle.appendChild(circleInner);
+                circle.appendChild(label);
+
+                if (index < questions.length - 1) {
+                    const line = document.createElement('div');
+                    line.className = `absolute top-5 left-1/2 -ml-1/2 w-[calc(100%-20px)] h-1 transition-colors duration-300 z-[-1] ${isCompleted ? 'bg-green-500' : 'bg-gray-300'}`;
+                    circle.appendChild(line);
+                }
+
+                progressBar.appendChild(circle);
+            });
+        }
+
+        /**
+         * Renderiza la pregunta actual y sus opciones
+         */
+        function renderCurrentQuestion() {
+            const container = document.getElementById('test-container');
+            container.innerHTML = '';
+            
+            if (currentStep >= questions.length) {
+                // Si ya terminó, mostramos el botón de enviar
+                renderSubmitScreen();
+                return;
+            }
+
+            const q = questions[currentStep];
+
+            const card = document.createElement('div');
+            card.className = 'bg-blue-50 p-6 rounded-xl shadow-lg border-t-4 border-blue-600';
+            card.innerHTML = `
+                <p class="text-sm font-semibold text-blue-600 mb-1">
+                    Área: ${q.area}
+                </p>
+                <h3 class="text-xl font-bold text-gray-800 mb-6">
+                    ${q.text}
+                </h3>
+            `;
+            
+            q.options.forEach(option => {
+                const isSelected = userAnswers[q.id] === option.value;
+                const optionDiv = document.createElement('div');
+                optionDiv.className = `
+                    p-4 mb-3 border-2 rounded-lg cursor-pointer transition duration-200 ease-in-out
+                    ${isSelected ? 'border-blue-500 bg-blue-100 shadow-md' : 'border-gray-200 hover:border-blue-300 bg-white'}
+                `;
+                optionDiv.innerHTML = `<p class="font-medium text-gray-700">${option.label}</p>`;
+                
+                optionDiv.onclick = () => handleAnswer(q.id, option.value);
+                card.appendChild(optionDiv);
+            });
+
+            // Botones de navegación
+            const nav = document.createElement('div');
+            nav.className = 'flex justify-between mt-6 pt-4 border-t border-gray-200';
+
+            const prevButton = document.createElement('button');
+            prevButton.textContent = '← Anterior';
+            prevButton.className = 'py-2 px-4 rounded-lg font-semibold transition duration-300';
+            if (currentStep > 0) {
+                prevButton.classList.add('bg-gray-200', 'hover:bg-gray-300', 'text-gray-700');
+                prevButton.onclick = () => goToStep(currentStep - 1);
+            } else {
+                prevButton.classList.add('text-gray-400', 'cursor-not-allowed');
+                prevButton.disabled = true;
+            }
+            nav.appendChild(prevButton);
+
+            const nextButton = document.createElement('button');
+            nextButton.textContent = 'Siguiente →';
+            nextButton.className = 'py-2 px-4 rounded-lg font-semibold transition duration-300';
+            
+            const hasAnswer = userAnswers[q.id];
+            if (hasAnswer) {
+                nextButton.classList.add('bg-blue-600', 'hover:bg-blue-700', 'text-white', 'shadow-md');
+                nextButton.onclick = () => goToStep(currentStep + 1);
+            } else {
+                nextButton.classList.add('bg-blue-300', 'text-white', 'cursor-not-allowed');
+                nextButton.disabled = true;
+            }
+            nav.appendChild(nextButton);
+
+            container.appendChild(card);
+            container.appendChild(nav);
+        }
+
+        /**
+         * Maneja la selección de respuesta por el usuario.
+         */
+        function handleAnswer(questionId, answerValue) {
+            userAnswers[questionId] = answerValue;
+            // Forzamos un re-render de la pregunta actual para actualizar el estado visual
+            renderCurrentQuestion(); 
+        }
+
+        /**
+         * Navega a un paso específico.
+         */
+        function goToStep(step) {
+            if (step >= 0 && step <= questions.length) {
+                // Si avanzamos, aseguramos que haya una respuesta
+                if (step > currentStep) {
+                    const qId = questions[currentStep].id;
+                    if (!userAnswers[qId]) return;
+                }
+                currentStep = step;
+                renderProgressBar();
+                renderCurrentQuestion();
+            }
+        }
+
+        /**
+         * Pantalla final antes de enviar las respuestas.
+         */
+        function renderSubmitScreen() {
+            const container = document.getElementById('test-container');
+            container.innerHTML = `
+                <div class="bg-green-50 p-6 rounded-xl shadow-lg border-t-4 border-green-600 text-center">
+                    <h3 class="text-2xl font-bold text-green-700 mb-4">
+                        ¡Test Completado!
+                    </h3>
+                    <p class="text-gray-700 mb-6">
+                        Hemos recolectado toda la información. Ahora, nuestro Contador Experto (Gemini) la analizará para ofrecerte un diagnóstico y los 3 primeros pasos para la transformación de tu PYME.
+                    </p>
+                    <button id="submit-button" onclick="submitTest()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg transition duration-300 shadow-lg transform hover:scale-105">
+                        Generar Diagnóstico
+                    </button>
+                </div>
+                <div class="flex justify-start mt-6 pt-4 border-t border-gray-200">
+                    <button onclick="goToStep(${questions.length - 1})" class="py-2 px-4 rounded-lg font-semibold bg-gray-200 hover:bg-gray-300 text-gray-700 transition duration-300">
+                        ← Revisar Última Pregunta
+                    </button>
+                </div>
+            `;
+            // Aseguramos que el contenedor de resultados esté oculto
+            document.getElementById('results-container').classList.add('hidden');
+        }
+
+        /**
+         * Procesa el resultado de la API y lo muestra.
+         */
+        function displayResults(diagnosticText) {
+            const outputDiv = document.getElementById('diagnostic-output');
+            outputDiv.innerHTML = '';
+            
+            // Separar el Tipo de PYME de los Tips (basado en el formato estricto)
+            const parts = diagnosticText.split('3 Tips para iniciar la transformación:');
+            const typePart = parts[0].trim();
+            const tipsPart = parts.length > 1 ? parts[1].trim() : '';
+
+            // 1. Mostrar Tipo de PYME
+            if (typePart.startsWith('Tipo de pyme:')) {
+                const typeHtml = `
+                    <div class="bg-blue-100 p-4 rounded-lg border-l-4 border-blue-500 mb-6">
+                        <h3 class="text-xl font-bold text-blue-800 mb-1">
+                            Diagnóstico: ${typePart.replace('Tipo de pyme:', '').trim()}
+                        </h3>
+                    </div>
+                `;
+                outputDiv.innerHTML += typeHtml;
+            } else {
+                outputDiv.innerHTML += `<p class="text-red-500 mb-4">Error al parsear el diagnóstico. Texto completo: ${typePart}</p>`;
+            }
+
+
+            // 2. Mostrar 3 Tips
+            if (tipsPart) {
+                const tipsHtml = `
+                    <h3 class="text-xl font-bold text-gray-800 mb-3">
+                        3 Tips Clave para Iniciar la Transformación:
+                    </h3>
+                    <ol class="list-decimal list-inside space-y-3 p-4 bg-white rounded-lg shadow-inner border border-gray-100">
+                        ${tipsPart.split('\n').map(tip => {
+                            // Limpia y formatea cada tip
+                            const cleanTip = tip.trim().replace(/^\d+\.\s*/, '');
+                            return cleanTip ? `<li class="text-gray-700">${cleanTip}</li>` : '';
+                        }).join('')}
+                    </ol>
+                `;
+                outputDiv.innerHTML += tipsHtml;
+            }
+
+            document.getElementById('loading-indicator').classList.add('hidden');
+            document.getElementById('test-container').classList.add('hidden');
+            document.getElementById('results-container').classList.remove('hidden');
+        }
+
+        /**
+         * Envía las respuestas al modelo de IA para el diagnóstico.
+         */
+        async function submitTest() {
+            const submitButton = document.getElementById('submit-button');
+            const loadingIndicator = document.getElementById('loading-indicator');
+            const outputDiv = document.getElementById('diagnostic-output');
+
+            submitButton.disabled = true;
+            submitButton.textContent = 'Enviando...';
+            loadingIndicator.classList.remove('hidden');
+            outputDiv.innerHTML = ''; // Limpiar salida anterior
+
+            // Formatear las respuestas para el prompt de la IA
+            const formattedAnswers = questions.map(q => {
+                const answer = userAnswers[q.id];
+                const optionLabel = q.options.find(opt => opt.value === answer)?.label || 'Sin respuesta';
+                return `P: ${q.text.split('. ')[1].trim()} -> R: ${optionLabel}`;
+            }).join('\n');
+
+            const systemPrompt = `
+                ROL:
+                Actúa como un experto Contador en PYMES Argentinas. Tu objetivo es analizar el nivel de madurez y los problemas principales de la PYME basándote en las 5 respuestas proporcionadas por el usuario, enfocándote en las áreas Contable (RECPAM, Balances), Impositiva (Estrategia Fiscal) y Financiera (Cash Flow, Acceso a Capital).
+
+                TAREA:
+                Basado en la información de respuestas del test que te hemos pasado, vas a inferir y describir en un solo párrafo qué "Tipo de PYME" tiene el usuario (ej: "PYME en Crecimiento con Riesgo de Liquidez", "Microemprendimiento en Fase de Formalización", "Empresa Estable con Alta Presión Fiscal", etc.). Luego, proporcionarás 3 "Tips para iniciar la transformación" claros, específicos y accionables para ayudarle a regularizar y profesionalizar su gestión en el contexto económico de Argentina.
+
+                FORMATO:
+                Tipo de pyme: [Aquí va tu diagnóstico conciso de la situación de la PYME en un solo párrafo.]
+                3 Tips para iniciar la transformación:
+                1. [Primer Tip accionable, conciso y específico.]
+                2. [Segundo Tip accionable, conciso y específico.]
+                3. [Tercer Tip accionable, conciso y específico.]
+            `;
+            
+            const userQuery = `Aquí están las 5 respuestas del usuario. Analízalas y dame el diagnóstico en el FORMATO solicitado:\n\n${formattedAnswers}`;
+
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+            };
+
+            try {
+                const result = await fetchWithRetry(payload);
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+
+                if (text) {
+                    displayResults(text);
+                } else {
+                    throw new Error("Respuesta del modelo vacía o incompleta.");
+                }
+
+            } catch (error) {
+                console.error("Error al obtener el diagnóstico:", error);
+                outputDiv.innerHTML = `
+                    <div class="text-red-600 p-4 bg-red-100 rounded-lg">
+                        <p class="font-bold mb-2">¡Error en la conexión!</p>
+                        <p>No pudimos obtener el diagnóstico del Contador Experto. Por favor, inténtalo de nuevo.</p>
+                        <p class="text-xs mt-2">Detalle: ${error.message}</p>
+                    </div>
+                `;
+            } finally {
+                submitButton.disabled = false;
+                submitButton.textContent = 'Generar Diagnóstico';
+                loadingIndicator.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Reinicia el test al estado inicial.
+         */
+        function restartTest() {
+            currentStep = 0;
+            userAnswers = {};
+            document.getElementById('results-container').classList.add('hidden');
+            document.getElementById('test-container').classList.remove('hidden');
+            initApp();
+        }
+
+        /**
+         * Inicializa la aplicación.
+         */
+        function initApp() {
+            renderProgressBar();
+            renderCurrentQuestion();
+        }
+
+        // --- Inicio de la Aplicación ---
+        window.onload = initApp;
+    </script>
+
+</body>
+</html>Guardar plantillas de contratos, planillas de Excel y correos. 
